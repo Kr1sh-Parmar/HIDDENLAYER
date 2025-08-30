@@ -1,0 +1,456 @@
+Project Structure:
+code
+Code
+VeridiChain-Brownie/
+├── contracts/
+│   └── GreenHydrogenCredit.sol
+│
+├── scripts/
+│   └── deploy.py
+│
+├── templates/
+│   └── index.html
+│
+├── venv/
+│
+├── accounts.json
+├── app.py
+├── brownie-config.yaml
+└── easy_run.py
+File 1: contracts/GreenHydrogenCredit.sol
+code
+Solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+// We use industry-standard, audited contracts from OpenZeppelin for security.
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title GreenHydrogenCredit
+ * @dev An ERC20 token representing a certified unit of green hydrogen production.
+ * The contract owner (initially the deployer) is designated as the government/regulatory body
+ * with the exclusive right to issue new credits and freeze accounts.
+ */
+contract GreenHydrogenCredit is ERC20, Ownable {
+
+    // A mapping to track accounts that have been frozen by the government.
+    mapping(address => bool) public isFrozen;
+
+    // This event is emitted when an account's status is changed.
+    event AccountFrozen(address indexed user, bool frozen);
+
+    /**
+     * @dev Sets the initial state of the contract, including the token name and symbol.
+     * The deployer of the contract is automatically set as the `owner`.
+     */
+    constructor() ERC20("Green Hydrogen Credit", "GHC") {}
+
+    // --- GOVERNMENT-ONLY FUNCTIONS ---
+
+    /**
+     * @dev Mints a specified `amount` of new credits and assigns them to a `producer` account.
+     * Can only be called by the contract owner (the government).
+     */
+    function issueCredits(address producer, uint256 amount) public onlyOwner {
+        _mint(producer, amount);
+    }
+
+    /**
+     * @dev Sets the frozen status of a user account.
+     * Can only be called by the contract owner.
+     */
+    function setAccountFrozen(address user, bool frozen) public onlyOwner {
+        isFrozen[user] = frozen;
+        emit AccountFrozen(user, frozen);
+    }
+
+    // --- MODIFIED CORE FUNCTIONS ---
+
+    /**
+     * @dev Overrides the internal ERC20 transfer function to add a security check.
+     * This hook ensures that no transfers can occur from or to a frozen account.
+     * It's automatically called by `transfer`, `transferFrom`, etc.
+     */
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+        // The transaction will fail if the 'from' or 'to' account is frozen.
+        require(!isFrozen[from], "ERC20: sender account is frozen");
+        require(!isFrozen[to], "ERC20: recipient account is frozen");
+        super._beforeTokenTransfer(from, to, amount);
+    }
+}
+File 2: scripts/deploy.py
+code
+Python
+from brownie import GreenHydrogenCredit, accounts, network
+
+def main():
+    """
+    Deploys the GreenHydrogenCredit smart contract.
+    This script is run by Brownie, either from the command line or from our app.py.
+    """
+    # The account that deploys the contract will become its "Owner".
+    # In our setup, this is always the first account from the local Ganache node.
+    gov_account = accounts[0]
+    
+    print(f"Deploying contract from government account: {gov_account.address}")
+
+    # Deploy the contract.
+    credit_contract = GreenHydrogenCredit.deploy({'from': gov_account})
+    
+    print(f"SUCCESS: Contract deployed at address: {credit_contract.address}")
+    
+    # Returning the contract object is good practice for scripting.
+    return credit_contract
+File 3: templates/index.html
+code
+Html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VeridiChain - Green Hydrogen Credits</title>
+    <style>
+        :root { --primary-color: #007bff; --secondary-color: #28a745; --danger-color: #dc3545; --bg-light: #f8f9fa; --border-color: #dee2e6; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: var(--bg-light); color: #212529; }
+        .header { background-color: white; padding: 20px 40px; border-bottom: 1px solid var(--border-color); text-align: center; }
+        .header h1 { margin: 0; color: var(--secondary-color); }
+        .container { display: flex; gap: 20px; padding: 20px; max-width: 1200px; margin: auto; }
+        .panel { flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { border-bottom: 2px solid var(--secondary-color); padding-bottom: 10px; margin-top: 0; }
+        button { font-size: 14px; padding: 10px 15px; margin: 5px 0; cursor: pointer; border-radius: 6px; border: none; font-weight: bold; width: 100%; text-align: left; transition: all 0.2s ease; }
+        button:hover { transform: scale(1.02); }
+        .btn-gov { background-color: var(--primary-color); color: white; }
+        .btn-prod { background-color: var(--secondary-color); color: white; }
+        .btn-citizen { background-color: #ffc107; color: #000; }
+        .btn-danger { background-color: var(--danger-color); color: white; }
+        #status-panel { grid-column: 1 / -1; }
+        #status { padding: 15px; background: #212529; color: #f8f9fa; border-radius: 5px; white-space: pre-wrap; font-family: Consolas, 'Courier New', monospace; line-height: 1.6; min-height: 150px; }
+        .account-info { margin-bottom: 15px; }
+        .account-info strong { display: block; margin-bottom: 5px; }
+        code { font-family: Consolas, 'Courier New', monospace; background: #e9ecef; padding: 2px 4px; border-radius: 3px; }
+        /* Payment Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); }
+        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        input[type="text"], input[type="number"] { width: calc(100% - 20px); padding: 10px; margin: 8px 0; display: inline-block; border: 1px solid #ccc; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>VeridiChain Network</h1></div>
+    <div class="container">
+        <div class="panel">
+            <h2>Government</h2>
+            <div class="account-info"><strong>Address:</strong> <code>{{ accounts.government }}</code></div>
+            <button class="btn-gov" onclick="callAPI('/gov/issue')">Issue 1000 GHC to Treasury</button>
+            <button class="btn-danger" onclick="callAPI('/gov/freeze-producer')">Freeze Producer Account</button>
+            <button class="btn-gov" onclick="callAPI('/gov/unfreeze-producer')">Unfreeze Producer Account</button>
+        </div>
+        <div class="panel">
+            <h2>Producer</h2>
+            <div class="account-info"><strong>Address:</strong> <code>{{ accounts.producer }}</code></div>
+            <button class="btn-prod" onclick="callAPI('/producer/transfer-factory')">Transfer 50 GHC to Factory</button>
+            <button class="btn-prod" onclick="callAPI('/producer/transfer-citizen')">Transfer 10 GHC to Citizen</button>
+        </div>
+        <div class="panel">
+            <h2>Citizen</h2>
+            <div class="account-info"><strong>Address:</strong> <code>{{ accounts.citizen }}</code></div>
+            <button class="btn-citizen" onclick="showPaymentModal()">Buy Green Credits (1 GHC = ₹300)</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="panel" id="status-panel">
+            <h2>Network Status & Balances</h2>
+            <div id="status">Loading...</div>
+        </div>
+    </div>
+
+    <!-- The Payment Modal -->
+    <div id="paymentModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="hidePaymentModal()">&times;</span>
+            <h2>Purchase Green Credits</h2>
+            <p>1 GHC = ₹300</p>
+            <label for="credits-to-buy">Amount of GHC to buy:</label>
+            <input type="number" id="credits-to-buy" value="5" oninput="updateCost()">
+            <p><strong>Total Cost: <span id="total-cost">₹1500</span></strong></p>
+            <hr>
+            <h4>Mock Payment Gateway</h4>
+            <input type="text" placeholder="Card Number (e.g., 4242...)">
+            <input type="text" placeholder="MM/YY">
+            <input type="text" placeholder="CVC">
+            <button class="btn-prod" onclick="processPayment()">Pay Now</button>
+        </div>
+    </div>
+
+<script>
+    const statusDiv = document.getElementById('status');
+    const modal = document.getElementById('paymentModal');
+    const GHC_TO_RUPEE = 300;
+
+    async function callAPI(endpoint, body) {
+        statusDiv.innerText = `Sending request to ${endpoint}...`;
+        try {
+            const options = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : null
+            };
+            const response = await fetch(endpoint, options);
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message);
+            statusDiv.innerText = `SUCCESS:\n${JSON.stringify(result, null, 2)}`;
+        } catch (error) {
+            statusDiv.innerText = `ERROR:\n${error.toString()}`;
+        }
+        updateBalances();
+    }
+
+    async function updateBalances() {
+        try {
+            const response = await fetch('/balances');
+            const data = await response.json();
+            let balanceText = `Contract Address: ${data.contract_address}\n\n`;
+            for (const [role, info] of Object.entries(data.accounts)) {
+                let roleName = role.charAt(0).toUpperCase() + role.slice(1);
+                balanceText += `${roleName.padEnd(10)}: ${info.balance.toFixed(2)} GHC (Frozen: ${info.frozen})\n`;
+            }
+            statusDiv.innerText = balanceText;
+        } catch (error) {
+            statusDiv.innerText = 'Could not fetch balances.';
+        }
+    }
+
+    // --- Modal Logic ---
+    function showPaymentModal() { modal.style.display = "block"; updateCost(); }
+    function hidePaymentModal() { modal.style.display = "none"; }
+    function updateCost() {
+        const amount = document.getElementById('credits-to-buy').value;
+        document.getElementById('total-cost').innerText = `₹${amount * GHC_TO_RUPEE}`;
+    }
+    function processPayment() {
+        const amount = document.getElementById('credits-to-buy').value;
+        statusDiv.innerText = "Processing mock payment...";
+        hidePaymentModal();
+        setTimeout(() => {
+            callAPI('/citizen/buy-credits', { amount: parseInt(amount) });
+        }, 1500); // Simulate network delay
+    }
+
+    window.onload = updateBalances;
+    window.onclick = function(event) { if (event.target == modal) hidePaymentModal(); }
+</script>
+</body>
+</html>
+File 4: accounts.json
+code
+JSON
+{
+  "government": 0,
+  "producer": 1,
+  "factory": 2,
+  "citizen": 3,
+  "treasury": 4
+}
+File 5: app.py
+code
+Python
+import os
+import json
+from flask import Flask, jsonify, render_template, request
+from brownie import project, network, accounts, run
+
+# --- CONSTANTS ---
+GHC_TO_RUPEE = 300
+
+# --- 1. INITIAL SETUP & BLOCKCHAIN CONNECTION ---
+try:
+    if not network.is_connected():
+        network.connect('development')
+    print("Successfully connected to the local blockchain.")
+except Exception as e:
+    print(f"FATAL: Could not connect to network. Error: {e}")
+    exit()
+
+# --- 2. LOAD PROJECT & CONTRACT TYPE ---
+try:
+    p = project.load()
+    GreenHydrogenCredit = p.GreenHydrogenCredit
+    print("Brownie project loaded successfully.")
+except Exception as e:
+    print(f"FATAL: Could not load Brownie project. Error: {e}")
+    exit()
+
+# --- 3. LOAD ACCOUNTS FROM JSON ---
+try:
+    with open('accounts.json', 'r') as f:
+        account_map = json.load(f)
+    
+    gov_account = accounts[account_map['government']]
+    producer_account = accounts[account_map['producer']]
+    factory_account = accounts[account_map['factory']]
+    citizen_account = accounts[account_map['citizen']]
+    treasury_account = accounts[account_map['treasury']]
+    
+    print("Loaded accounts from accounts.json")
+except Exception as e:
+    print(f"FATAL: Could not load accounts.json. Error: {e}")
+    exit()
+
+# --- 4. CHECK FOR DEPLOYMENT AND DEPLOY IF NEEDED ---
+try:
+    credit_contract = GreenHydrogenCredit[-1]
+    print(f"Found existing contract at: {credit_contract.address}")
+except IndexError:
+    print("Contract not found. Deploying a new one automatically...")
+    try:
+        run('scripts/deploy.py', 'main')
+        credit_contract = GreenHydrogenCredit[-1]
+        print(f"New contract deployed and connected at: {credit_contract.address}")
+    except Exception as e:
+        print(f"FATAL: Automatic deployment failed. Error: {e}")
+        exit()
+
+# --- 5. FLASK WEB SERVER ---
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    account_addresses = {
+        'government': gov_account.address,
+        'producer': producer_account.address,
+        'factory': factory_account.address,
+        'citizen': citizen_account.address
+    }
+    return render_template('index.html', accounts=account_addresses)
+
+# --- API ENDPOINTS ---
+
+@app.route('/balances', methods=['GET'])
+def get_balances():
+    try:
+        account_balances = {}
+        for role, acc in [('producer', producer_account), ('factory', factory_account), ('citizen', citizen_account), ('treasury', treasury_account)]:
+            account_balances[role] = {
+                'balance': credit_contract.balanceOf(acc) / 10**18,
+                'frozen': credit_contract.isFrozen(acc)
+            }
+        
+        return jsonify({
+            'contract_address': credit_contract.address,
+            'accounts': account_balances
+        })
+    except Exception as e:
+        return jsonify({'message': f'Error fetching balances: {e}'}), 500
+
+@app.route('/gov/issue', methods=['POST'])
+def issue_credits():
+    # Gov now issues to a treasury account to simulate a reserve for citizens to buy from.
+    # A second "issue" could be made directly to the producer if needed.
+    tx = credit_contract.issueCredits(treasury_account, 1000 * 10**18, {'from': gov_account})
+    tx.wait(1)
+    # Also issue some starting funds to the producer to work with.
+    tx2 = credit_contract.issueCredits(producer_account, 500 * 10**18, {'from': gov_account})
+    tx2.wait(1)
+    return jsonify({'message': 'Issued 1000 GHC to Treasury and 500 GHC to Producer.', 'tx_hash': tx.txid})
+
+@app.route('/gov/freeze-producer', methods=['POST'])
+def freeze_producer():
+    tx = credit_contract.setAccountFrozen(producer_account, True, {'from': gov_account})
+    tx.wait(1)
+    return jsonify({'message': 'Producer account has been frozen.', 'tx_hash': tx.txid})
+
+@app.route('/gov/unfreeze-producer', methods=['POST'])
+def unfreeze_producer():
+    tx = credit_contract.setAccountFrozen(producer_account, False, {'from': gov_account})
+    tx.wait(1)
+    return jsonify({'message': 'Producer account has been unfrozen.', 'tx_hash': tx.txid})
+
+@app.route('/producer/transfer-factory', methods=['POST'])
+def transfer_to_factory():
+    try:
+        tx = credit_contract.transfer(factory_account, 50 * 10**18, {'from': producer_account})
+        tx.wait(1)
+        return jsonify({'message': 'Transferred 50 GHC to Factory.', 'tx_hash': tx.txid})
+    except Exception as e:
+        return jsonify({'message': f'Transaction failed: {e}'}), 400
+
+@app.route('/producer/transfer-citizen', methods=['POST'])
+def transfer_to_citizen():
+    try:
+        tx = credit_contract.transfer(citizen_account, 10 * 10**18, {'from': producer_account})
+        tx.wait(1)
+        return jsonify({'message': 'Transferred 10 GHC to Citizen.', 'tx_hash': tx.txid})
+    except Exception as e:
+        return jsonify({'message': f'Transaction failed: {e}'}), 400
+
+@app.route('/citizen/buy-credits', methods=['POST'])
+def buy_credits():
+    data = request.get_json()
+    amount = data.get('amount')
+    if not isinstance(amount, int) or amount <= 0:
+        return jsonify({'message': 'Invalid amount specified.'}), 400
+    
+    try:
+        amount_wei = amount * 10**18
+        if credit_contract.balanceOf(treasury_account) < amount_wei:
+            return jsonify({'message': 'Treasury is out of credits to sell.'}), 500
+
+        tx = credit_contract.transfer(citizen_account, amount_wei, {'from': treasury_account})
+        tx.wait(1)
+        cost = amount * GHC_TO_RUPEE
+        return jsonify({'message': f'Successfully purchased {amount} GHC for {cost} INR.', 'tx_hash': tx.txid})
+    except Exception as e:
+        return jsonify({'message': f'Purchase failed: {e}'}), 400
+
+# --- Main Entry Point ---
+if __name__ == '__main__':
+    print("Starting VeridiChain Web Application...")
+    app.run(port=5001, debug=True, use_reloader=False)
+File 6: brownie-config.yaml
+code
+Yaml
+# Brownie configuration file
+dependencies:
+  - OpenZeppelin/openzeppelin-contracts@4.8.0
+
+compiler:
+  solc:
+    remappings:
+      - '@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.8.0'
+File 7: easy_run.py
+code
+Python
+import os
+import subprocess
+import sys
+
+# This script simplifies the startup process for the VeridiChain application.
+# It automatically finds and uses the Python executable from the virtual environment.
+
+project_dir = os.path.dirname(os.path.abspath(__file__))
+
+if sys.platform == "win32":
+    venv_python = os.path.join(project_dir, 'venv', 'Scripts', 'python.exe')
+else:
+    venv_python = os.path.join(project_dir, 'venv', 'bin', 'python')
+
+app_script = os.path.join(project_dir, 'app.py')
+
+if not os.path.exists(venv_python):
+    print(f"ERROR: Could not find Python executable in venv at: {venv_python}")
+    print("Please make sure you have created the virtual environment by running: python -m venv venv")
+    sys.exit(1)
+
+print(f"Found venv Python at: {venv_python}")
+print("Starting VeridiChain application...")
+print("-" * 30)
+
+try:
+    subprocess.call([venv_python, app_script])
+except KeyboardInterrupt:
+    print("\nApplication stopped by user.")
+except Exception as e:
+    print(f"\nAn error occurred: {e}")

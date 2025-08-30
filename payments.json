@@ -1,0 +1,11 @@
+[
+  {
+    "payment_id": "pay_mock_1756516700_2085",
+    "user_address": "0x0063046686E46Dc6F15918b61AE2B121458534a5",
+    "amount_ghc": 470,
+    "amount_rupees": 145700,
+    "gateway": "razorpay_mock",
+    "status": "SUCCESS",
+    "timestamp": "2025-08-30T01:18:20.030056Z"
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "government": 0,
+  "producer": 1,
+  "factory": 2,
+  "citizen": 3,
+  "state_pollution_body": 4
+}
